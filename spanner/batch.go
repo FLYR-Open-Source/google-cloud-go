@@ -403,7 +403,8 @@ func (t *BatchReadOnlyTransaction) Execute(ctx context.Context, p *Partition) *R
 		t.sp.sc.metricsTracerFactory,
 		rpc,
 		t.setTimestamp,
-		t.release, client.(*grpcSpannerClient))
+		t.release, client.(*grpcSpannerClient),
+		sh.session.pool.otConfig)
 }
 
 // MarshalBinary implements BinaryMarshaler.

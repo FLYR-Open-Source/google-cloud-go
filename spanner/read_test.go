@@ -1411,7 +1411,8 @@ func TestResumeToken(t *testing.T) {
 				return sr, err
 			},
 			nil,
-			func(error) {}, mc.(*grpcSpannerClient))
+			func(error) {}, mc.(*grpcSpannerClient),
+			c.otConfig)
 	}
 
 	// Establish a stream to mock cloud spanner server.
@@ -1558,7 +1559,8 @@ func TestGrpcReconnect(t *testing.T) {
 
 		},
 		nil,
-		func(error) {}, mc.(*grpcSpannerClient))
+		func(error) {}, mc.(*grpcSpannerClient),
+		c.otConfig)
 	defer iter.Stop()
 	for {
 		_, err := iter.Next()
@@ -1617,7 +1619,8 @@ func TestRetryResourceExhaustedWithoutRetryInfo(t *testing.T) {
 
 		},
 		nil,
-		func(error) {}, mc.(*grpcSpannerClient))
+		func(error) {}, mc.(*grpcSpannerClient),
+		c.otConfig)
 	defer iter.Stop()
 	for {
 		_, err := iter.Next()
@@ -1683,7 +1686,8 @@ func TestRetryResourceExhaustedWithRetryInfo(t *testing.T) {
 
 		},
 		nil,
-		func(error) {}, mc.(*grpcSpannerClient))
+		func(error) {}, mc.(*grpcSpannerClient),
+		c.otConfig)
 	defer iter.Stop()
 	for {
 		_, err := iter.Next()
@@ -1735,7 +1739,8 @@ func TestCancelTimeout(t *testing.T) {
 				}, opts...)
 			},
 			nil,
-			func(error) {}, mc.(*grpcSpannerClient))
+			func(error) {}, mc.(*grpcSpannerClient),
+			c.otConfig)
 		defer iter.Stop()
 		for {
 			_, err = iter.Next()
@@ -1772,7 +1777,8 @@ func TestCancelTimeout(t *testing.T) {
 				}, opts...)
 			},
 			nil,
-			func(error) {}, mc.(*grpcSpannerClient))
+			func(error) {}, mc.(*grpcSpannerClient),
+			c.otConfig)
 		defer iter.Stop()
 		for {
 			_, err = iter.Next()
@@ -1923,7 +1929,8 @@ func TestRowIteratorDo(t *testing.T) {
 			}, opts...)
 		},
 		nil,
-		func(error) {}, mc.(*grpcSpannerClient))
+		func(error) {}, mc.(*grpcSpannerClient),
+		c.otConfig)
 	err = iter.Do(func(r *Row) error { nRows++; return nil })
 	if err != nil {
 		t.Errorf("Using Do: %v", err)
@@ -1960,7 +1967,8 @@ func TestRowIteratorDoWithError(t *testing.T) {
 			}, opts...)
 		},
 		nil,
-		func(error) {}, mc.(*grpcSpannerClient))
+		func(error) {}, mc.(*grpcSpannerClient),
+		c.otConfig)
 	injected := errors.New("Failed iterator")
 	err = iter.Do(func(r *Row) error { return injected })
 	if err != injected {
@@ -1996,7 +2004,8 @@ func TestIteratorStopEarly(t *testing.T) {
 			}, opts...)
 		},
 		nil,
-		func(error) {}, mc.(*grpcSpannerClient))
+		func(error) {}, mc.(*grpcSpannerClient),
+		c.otConfig)
 	_, err = iter.Next()
 	if err != nil {
 		t.Fatalf("before Stop: %v", err)

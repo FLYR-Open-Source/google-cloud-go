@@ -60,6 +60,7 @@ func stream(
 	setTimestamp func(time.Time),
 	release func(error),
 	gsc *grpcSpannerClient,
+	otConfig *openTelemetryConfig,
 ) *RowIterator {
 	return streamWithReplaceSessionFunc(
 		ctx,
@@ -75,6 +76,7 @@ func stream(
 		setTimestamp,
 		release,
 		gsc,
+		otConfig,
 	)
 }
 
@@ -93,9 +95,10 @@ func streamWithReplaceSessionFunc(
 	setTimestamp func(time.Time),
 	release func(error),
 	gsc *grpcSpannerClient,
+	otConfig *openTelemetryConfig,
 ) *RowIterator {
 	ctx, cancel := context.WithCancel(ctx)
-	ctx, _ = startSpan(ctx, "RowIterator")
+	ctx, _ = startSpan(ctx, "RowIterator", otConfig.tracerProvider)
 	return &RowIterator{
 		meterTracerFactory:   meterTracerFactory,
 		streamd:              newResumableStreamDecoder(ctx, cancel, logger, rpc, replaceSession, gsc),
@@ -287,9 +290,9 @@ func (r *RowIterator) Do(f func(r *Row) error) error {
 func (r *RowIterator) Stop() {
 	if r.streamd != nil {
 		if r.err != nil && r.err != iterator.Done {
-			defer trace.EndSpan(r.streamd.ctx, r.err)
+			defer endSpan(r.streamd.ctx, r.err)
 		} else {
-			defer trace.EndSpan(r.streamd.ctx, nil)
+			defer endSpan(r.streamd.ctx, nil)
 		}
 	}
 	if r.cancel != nil {
