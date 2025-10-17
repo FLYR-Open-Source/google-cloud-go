@@ -35,13 +35,16 @@ const (
 	gcpClientArtifact = "cloud.google.com/go/spanner"
 )
 
+// tracerProvider sets the OpenTelemetry tracer provider for the client.
+// If OpenTelemetry tracing is disabled, a noop tracer provider is used.
 func tracerProvider(config *ClientConfig) {
 	if !config.EnableOpenTelemetryTracing {
-		config.TracerProvider = noop.NewTracerProvider()
+		config.OpenTelemetryTracerProvider = noop.NewTracerProvider()
+		return
 	}
 
-	if config.TracerProvider == nil {
-		config.TracerProvider = otel.GetTracerProvider()
+	if config.OpenTelemetryTracerProvider == nil {
+		config.OpenTelemetryTracerProvider = otel.GetTracerProvider()
 	}
 }
 
@@ -94,6 +97,8 @@ func setOpenTelemetryTracerProvider(config *openTelemetryConfig, tp trace.Tracer
 	config.tracerProvider = tp
 }
 
+// shutdownTracerProvider shuts down the OpenTelemetry tracer provider.
+// If the tracer provider is nil, no action is taken.
 func shutdownTracerProvider(ctx context.Context, tp trace.TracerProvider) error {
 	if tp == nil {
 		return nil

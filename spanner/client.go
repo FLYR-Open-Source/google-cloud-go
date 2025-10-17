@@ -373,10 +373,10 @@ type ClientConfig struct {
 	// This defaults to false.
 	EnableOpenTelemetryTracing bool
 
-	// TracerProvider is the tracer provider to use for this client.
+	// OpenTelemetryTracerProvider is the tracer provider to use for this client.
 	// If nil, the global tracer provider will be used if the EnableOpenTelemetryTracing option is true.
 	// Otherwise, a noop tracer provider will be used.
-	TracerProvider otrace.TracerProvider
+	OpenTelemetryTracerProvider otrace.TracerProvider
 }
 
 type openTelemetryConfig struct {
@@ -433,7 +433,7 @@ func newClientWithConfig(ctx context.Context, database string, config ClientConf
 
 	tracerProvider(&config)
 
-	ctx, _ = startSpan(ctx, "NewClient", config.TracerProvider)
+	ctx, _ = startSpan(ctx, "NewClient", config.OpenTelemetryTracerProvider)
 	defer func() { endSpan(ctx, err) }()
 
 	// Explicitly disable some gRPC experiments as they are not stable yet.
@@ -617,7 +617,7 @@ func newClientWithConfig(ctx context.Context, database string, config ClientConf
 		// The error returned here will be due to database name parsing
 		return nil, err
 	}
-	setOpenTelemetryTracerProvider(otConfig, config.TracerProvider)
+	setOpenTelemetryTracerProvider(otConfig, config.OpenTelemetryTracerProvider)
 
 	// To prevent data race in unit tests (ex: TestClient_SessionNotFound)
 	sc.mu.Lock()
