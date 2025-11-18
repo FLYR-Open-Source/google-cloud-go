@@ -367,11 +367,22 @@ type ClientConfig struct {
 
 	// Default: false
 	IsExperimentalHost bool
+
+	// EnableOpenTelemetryTracing enables tracing for this client.
+	// This option allows selectively disabling Spanner traces.
+	// This defaults to false.
+	EnableOpenTelemetryTracing bool
+
+	// OpenTelemetryTracerProvider is the tracer provider to use for this client.
+	// If nil, the global tracer provider will be used if the EnableOpenTelemetryTracing option is true.
+	// Otherwise, a noop tracer provider will be used.
+	OpenTelemetryTracerProvider otrace.TracerProvider
 }
 
 type openTelemetryConfig struct {
 	enabled                        bool
 	meterProvider                  metric.MeterProvider
+	tracerProvider                 otrace.TracerProvider
 	commonTraceStartOptions        []otrace.SpanStartOption
 	attributeMap                   []attribute.KeyValue
 	attributeMapWithMultiplexed    []attribute.KeyValue
@@ -420,7 +431,9 @@ func newClientWithConfig(ctx context.Context, database string, config ClientConf
 		return nil, err
 	}
 
-	ctx, _ = startSpan(ctx, "NewClient")
+	tracerProvider(&config)
+
+	ctx, _ = startSpan(ctx, "NewClient", config.OpenTelemetryTracerProvider)
 	defer func() { endSpan(ctx, err) }()
 
 	// Explicitly disable some gRPC experiments as they are not stable yet.
@@ -440,6 +453,9 @@ func newClientWithConfig(ctx context.Context, database string, config ClientConf
 			option.WithGRPCDialOption(grpc.WithTransportCredentials(insecure.NewCredentials())),
 			option.WithoutAuthentication(),
 			internaloption.SkipDialSettingsValidation(),
+		}
+		if !config.EnableOpenTelemetryTracing {
+			emulatorOpts = append(emulatorOpts, option.WithTelemetryDisabled())
 		}
 		opts = append(emulatorOpts, opts...)
 	}
@@ -485,6 +501,9 @@ func newClientWithConfig(ctx context.Context, database string, config ClientConf
 	}
 	if len(metricsTracerFactory.clientOpts) > 0 {
 		opts = append(opts, metricsTracerFactory.clientOpts...)
+	}
+	if !config.EnableOpenTelemetryTracing {
+		opts = append(opts, option.WithTelemetryDisabled())
 	}
 
 	var pool gtransport.ConnPool
@@ -545,7 +564,7 @@ func newClientWithConfig(ctx context.Context, database string, config ClientConf
 	// environment variable has been set or client has passed the opt-in
 	// option in ClientConfig.
 	endToEndTracingEnvironmentVariable := os.Getenv("SPANNER_ENABLE_END_TO_END_TRACING")
-	if config.EnableEndToEndTracing || endToEndTracingEnvironmentVariable == "true" {
+	if config.EnableOpenTelemetryTracing && (config.EnableEndToEndTracing || endToEndTracingEnvironmentVariable == "true") {
 		md.Append(endToEndTracingHeader, "true")
 	}
 
@@ -592,13 +611,14 @@ func newClientWithConfig(ctx context.Context, database string, config ClientConf
 
 	// Create a session client.
 	sc := newSessionClient(pool, database, config.UserAgent, sessionLabels, config.DatabaseRole, config.DisableRouteToLeader, md, config.BatchTimeout, config.Logger, config.CallOptions)
-
 	// Create an OpenTelemetry configuration
 	otConfig, err := createOpenTelemetryConfig(ctx, config.OpenTelemetryMeterProvider, config.Logger, sc.id, database)
 	if err != nil {
 		// The error returned here will be due to database name parsing
 		return nil, err
 	}
+	setOpenTelemetryTracerProvider(otConfig, config.OpenTelemetryTracerProvider)
+
 	// To prevent data race in unit tests (ex: TestClient_SessionNotFound)
 	sc.mu.Lock()
 	sc.otConfig = otConfig
@@ -801,6 +821,11 @@ func (c *Client) Close() {
 	if c.metricsTracerFactory != nil {
 		c.metricsTracerFactory.shutdown(context.Background())
 	}
+
+	if c.otConfig.tracerProvider != nil {
+		shutdownTracerProvider(context.Background(), c.otConfig.tracerProvider)
+	}
+
 	if c.idleSessions != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -1022,7 +1047,7 @@ func checkNestedTxn(ctx context.Context) error {
 // See https://godoc.org/cloud.google.com/go/spanner#ReadWriteTransaction for
 // more details.
 func (c *Client) ReadWriteTransaction(ctx context.Context, f func(context.Context, *ReadWriteTransaction) error) (commitTimestamp time.Time, err error) {
-	ctx, _ = startSpan(ctx, "ReadWriteTransaction", c.otConfig.commonTraceStartOptions...)
+	ctx, _ = startSpan(ctx, "ReadWriteTransaction", c.otConfig.tracerProvider, c.otConfig.commonTraceStartOptions...)
 	defer func() { endSpan(ctx, err) }()
 	resp, err := c.rwTransaction(ctx, f, TransactionOptions{})
 	return resp.CommitTs, err
@@ -1036,7 +1061,7 @@ func (c *Client) ReadWriteTransaction(ctx context.Context, f func(context.Contex
 // See https://godoc.org/cloud.google.com/go/spanner#ReadWriteTransaction for
 // more details.
 func (c *Client) ReadWriteTransactionWithOptions(ctx context.Context, f func(context.Context, *ReadWriteTransaction) error, options TransactionOptions) (resp CommitResponse, err error) {
-	ctx, _ = startSpan(ctx, "ReadWriteTransactionWithOptions", c.otConfig.commonTraceStartOptions...)
+	ctx, _ = startSpan(ctx, "ReadWriteTransactionWithOptions", c.otConfig.tracerProvider, c.otConfig.commonTraceStartOptions...)
 	defer func() { endSpan(ctx, err) }()
 	resp, err = c.rwTransaction(ctx, f, options)
 	return resp, err
@@ -1219,7 +1244,7 @@ func (c *Client) Apply(ctx context.Context, ms []*Mutation, opts ...ApplyOption)
 		opt(ao)
 	}
 
-	ctx, _ = startSpan(ctx, "Apply", c.otConfig.commonTraceStartOptions...)
+	ctx, _ = startSpan(ctx, "Apply", c.otConfig.tracerProvider, c.otConfig.commonTraceStartOptions...)
 	defer func() { endSpan(ctx, err) }()
 
 	if !ao.atLeastOnce {
@@ -1332,7 +1357,7 @@ func (r *BatchWriteResponseIterator) Stop() {
 		if err == iterator.Done {
 			err = nil
 		}
-		defer trace.EndSpan(r.ctx, err)
+		defer endSpan(r.ctx, err)
 	}
 	if r.cancel != nil {
 		r.cancel()
@@ -1392,12 +1417,10 @@ func (c *Client) BatchWrite(ctx context.Context, mgs []*MutationGroup) *BatchWri
 
 // BatchWriteWithOptions is same as BatchWrite. It accepts additional options to customize the request.
 func (c *Client) BatchWriteWithOptions(ctx context.Context, mgs []*MutationGroup, opts BatchWriteOptions) *BatchWriteResponseIterator {
-	ctx, _ = startSpan(ctx, "BatchWrite", c.otConfig.commonTraceStartOptions...)
+	ctx, _ = startSpan(ctx, "BatchWrite", c.otConfig.tracerProvider, c.otConfig.commonTraceStartOptions...)
 
 	var err error
-	defer func() {
-		trace.EndSpan(ctx, err)
-	}()
+	defer func() { endSpan(ctx, err) }()
 
 	opts = c.bwo.merge(opts)
 
@@ -1453,7 +1476,7 @@ func (c *Client) BatchWriteWithOptions(ctx context.Context, mgs []*MutationGroup
 	}
 
 	ctx, cancel := context.WithCancel(ctx)
-	ctx, _ = startSpan(ctx, "BatchWriteResponseIterator", c.otConfig.commonTraceStartOptions...)
+	ctx, _ = startSpan(ctx, "BatchWriteResponseIterator", c.otConfig.tracerProvider, c.otConfig.commonTraceStartOptions...)
 	return &BatchWriteResponseIterator{
 		ctx:                ctx,
 		meterTracerFactory: c.metricsTracerFactory,

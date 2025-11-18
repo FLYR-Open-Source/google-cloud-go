@@ -22,7 +22,9 @@ import (
 	"cloud.google.com/go/spanner/internal"
 	"go.opentelemetry.io/otel"
 	otelcodes "go.opentelemetry.io/otel/codes"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 	"google.golang.org/api/googleapi"
 	"google.golang.org/grpc/status"
 )
@@ -33,16 +35,33 @@ const (
 	gcpClientArtifact = "cloud.google.com/go/spanner"
 )
 
-func tracer() trace.Tracer {
-	return otel.Tracer(defaultTracerName, trace.WithInstrumentationVersion(internal.Version))
+// tracerProvider sets the OpenTelemetry tracer provider for the client.
+// If OpenTelemetry tracing is disabled, a noop tracer provider is used.
+func tracerProvider(config *ClientConfig) {
+	if !config.EnableOpenTelemetryTracing {
+		config.OpenTelemetryTracerProvider = noop.NewTracerProvider()
+		return
+	}
+
+	if config.OpenTelemetryTracerProvider == nil {
+		config.OpenTelemetryTracerProvider = otel.GetTracerProvider()
+	}
+}
+
+func tracer(tp trace.TracerProvider) trace.Tracer {
+	return tp.Tracer(defaultTracerName, trace.WithInstrumentationVersion(internal.Version))
 }
 
 // startSpan creates a span and a context.Context containing the newly-created span.
 // If the context.Context provided in `ctx` contains a span then the newly-created
 // span will be a child of that span, otherwise it will be a root span.
-func startSpan(ctx context.Context, name string, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+func startSpan(ctx context.Context, name string, tp trace.TracerProvider, opts ...trace.SpanStartOption) (context.Context, trace.Span) {
+	if tp == nil {
+		return ctx, trace.SpanFromContext(ctx)
+	}
+
 	name = prependPackageName(name)
-	ctx, span := tracer().Start(ctx, name, opts...)
+	ctx, span := tracer(tp).Start(ctx, name, opts...)
 	return ctx, span
 }
 
@@ -72,4 +91,23 @@ func toOpenTelemetryStatusDescription(err error) string {
 
 func prependPackageName(spanName string) string {
 	return fmt.Sprintf("%s.%s", gcpClientArtifact, spanName)
+}
+
+func setOpenTelemetryTracerProvider(config *openTelemetryConfig, tp trace.TracerProvider) {
+	config.tracerProvider = tp
+}
+
+// shutdownTracerProvider shuts down the OpenTelemetry tracer provider.
+// If the tracer provider is nil, no action is taken.
+func shutdownTracerProvider(ctx context.Context, tp trace.TracerProvider) error {
+	if tp == nil {
+		return nil
+	}
+
+	tc, ok := tp.(*sdktrace.TracerProvider)
+	if !ok {
+		return nil
+	}
+
+	return tc.Shutdown(ctx)
 }

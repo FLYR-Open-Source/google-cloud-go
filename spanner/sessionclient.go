@@ -270,7 +270,7 @@ func (sc *sessionClient) executeBatchCreateSessions(client spannerClient, create
 	defer sc.waitWorkers.Done()
 	ctx, cancel := context.WithTimeout(context.Background(), sc.batchTimeout)
 	defer cancel()
-	ctx, _ = startSpan(ctx, "BatchCreateSessions", sc.otConfig.commonTraceStartOptions...)
+	ctx, _ = startSpan(ctx, "BatchCreateSessions", sc.otConfig.tracerProvider, sc.otConfig.commonTraceStartOptions...)
 	defer func() { endSpan(ctx, nil) }()
 	trace.TracePrintf(ctx, nil, "Creating a batch of %d sessions", createCount)
 
@@ -342,7 +342,7 @@ func (sc *sessionClient) executeBatchCreateSessions(client spannerClient, create
 }
 
 func (sc *sessionClient) executeCreateMultiplexedSession(ctx context.Context, client spannerClient, md metadata.MD, consumer sessionConsumer) {
-	ctx, _ = startSpan(ctx, "CreateSession", sc.otConfig.commonTraceStartOptions...)
+	ctx, _ = startSpan(ctx, "CreateSession", sc.otConfig.tracerProvider, sc.otConfig.commonTraceStartOptions...)
 	defer func() { endSpan(ctx, nil) }()
 	trace.TracePrintf(ctx, nil, "Creating a multiplexed session")
 	sc.mu.Lock()

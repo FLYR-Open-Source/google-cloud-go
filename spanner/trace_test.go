@@ -51,7 +51,7 @@ func TestTraceSpannerTraceStartEndSpan(t *testing.T) {
 	}
 	newAttrs := attribute.Int("fakeKey", 800)
 
-	ctx, span := startSpan(ctx, spanName, spanStartOpts...)
+	ctx, span := startSpan(ctx, spanName, tp, spanStartOpts...)
 	span.SetAttributes(newAttrs)
 	endSpan(ctx, nil)
 

@@ -46,7 +46,7 @@ func (c *Client) PartitionedUpdateWithOptions(ctx context.Context, statement Sta
 }
 
 func (c *Client) partitionedUpdate(ctx context.Context, statement Statement, options QueryOptions) (count int64, err error) {
-	ctx, _ = startSpan(ctx, "PartitionedUpdate", c.otConfig.commonTraceStartOptions...)
+	ctx, _ = startSpan(ctx, "PartitionedUpdate", c.otConfig.tracerProvider, c.otConfig.commonTraceStartOptions...)
 	defer func() { endSpan(ctx, err) }()
 	if err := checkNestedTxn(ctx); err != nil {
 		return 0, err
